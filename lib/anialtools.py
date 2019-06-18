@@ -651,103 +651,72 @@ class anitrainerinputdesigner:
 class alaniensembletrainer():
     def __init__(self, train_root, netdict, h5dir, Nn):
         self.train_root = train_root
-        #self.train_pref = train_pref
         self.h5dir = h5dir
         self.Nn = Nn
         self.netdict = netdict
-
         self.h5file = [f for f in os.listdir(self.h5dir) if f.rsplit('.',1)[1] == 'h5']
-        #print(self.h5dir,self.h5file)
-
     def build_training_cache(self,forces=True):
         store_dir = self.train_root + "cache-data-"
         N = self.Nn
-
         for i in range(N):
             if not os.path.exists(store_dir + str(i)):
                 os.mkdir(store_dir + str(i))
-
             if os.path.exists(store_dir + str(i) + '/../testset/testset' + str(i) + '.h5'):
                 os.remove(store_dir + str(i) + '/../testset/testset' + str(i) + '.h5')
-
             if not os.path.exists(store_dir + str(i) + '/../testset'):
                 os.mkdir(store_dir + str(i) + '/../testset')
-
         cachet = [cg('_train', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
         cachev = [cg('_valid', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
         testh5 = [pyt.datapacker(store_dir + str(r) + '/../testset/testset' + str(r) + '.h5') for r in range(N)]
-
         Nd = np.zeros(N, dtype=np.int32)
         Nbf = 0
         for f, fn in enumerate(self.h5file):
             print('Processing file(' + str(f + 1) + ' of ' + str(len(self.h5file)) + '):', fn)
             adl = pyt.anidataloader(self.h5dir+fn)
-
             To = adl.size()
             Ndc = 0
             Fmt = []
             Emt = []
             for c, data in enumerate(adl):
                 Pn = data['path'] + '_' + str(f).zfill(6) + '_' + str(c).zfill(6)
-
-                # Progress indicator
-                #sys.stdout.write("\r%d%% %s" % (int(100 * c / float(To)), Pn))
-                #sys.stdout.flush()
-
-                # print(data.keys())
-
                 # Extract the data
                 X = data['coordinates']
                 E = data['energies']
                 S = data['species']
-
                 # 0.0 forces if key doesnt exist
                 if forces:
                     F = data['forces']
                 else:
                     F = 0.0*X
-
                 Fmt.append(np.max(np.linalg.norm(F, axis=2), axis=1))
                 Emt.append(E)
                 Mv = np.max(np.linalg.norm(F, axis=2), axis=1)
-
                 index = np.where(Mv > 10.5)[0]
                 indexk = np.where(Mv <= 10.5)[0]
-
                 Nbf += index.size
-
-                # CLear forces
+                # Clear forces
                 X = X[indexk]
                 F = F[indexk]
                 E = E[indexk]
-
                 Esae = hdt.compute_sae(self.netdict['saefile'],S)
-
                 hidx = np.where(np.abs(E-Esae) > 10.0)
                 lidx = np.where(np.abs(E-Esae) <= 10.0)
                 if hidx[0].size > 0:
                     print('  -('+str(c).zfill(3)+')High energies detected:\n    ',E[hidx])
-
                 X = X[lidx]
                 E = E[lidx]
                 F = F[lidx]
-
                 Ndc += E.size
-
                 if (set(S).issubset(self.netdict['atomtyp'])):
-                #if (set(S).issubset(['C', 'N', 'O', 'H', 'F', 'S', 'Cl'])):
-
                     # Random mask
                     R = np.random.uniform(0.0, 1.0, E.shape[0])
                     idx = np.array([interval(r, N) for r in R])
-
                     # Build random split lists
                     split = []
                     for j in range(N):
                         split.append([i for i, s in enumerate(idx) if s == j])
                         nd = len([i for i, s in enumerate(idx) if s == j])
                         Nd[j] = Nd[j] + nd
-
                     # Store data
                     for i, t, v, te in zip(range(N), cachet, cachev, testh5):
                         ## Store training data
@@ -757,13 +726,8 @@ class alaniensembletrainer():
                                        dtype=np.float32)
                         E_t = np.array(np.concatenate([E[s] for j, s in enumerate(split) if j != i]), order='C',
                                        dtype=np.float64)
-
                         if E_t.shape[0] != 0:
                             t.insertdata(X_t, F_t, E_t, list(S))
-
-                        ## Split test/valid data and store\
-                        #tv_split = np.array_split(split[i], 2)
-
                         ## Store Validation
                         if np.array(split[i]).size > 0:
                             X_v = np.array(X[split[i]], order='C', dtype=np.float32)
@@ -771,25 +735,9 @@ class alaniensembletrainer():
                             E_v = np.array(E[split[i]], order='C', dtype=np.float64)
                             if E_v.shape[0] != 0:
                                 v.insertdata(X_v, F_v, E_v, list(S))
-
-                        ## Store testset
-                        #if tv_split[1].size > 0:
-                            #X_te = np.array(X[split[i]], order='C', dtype=np.float32)
-                            #F_te = np.array(F[split[i]], order='C', dtype=np.float32)
-                            #E_te = np.array(E[split[i]], order='C', dtype=np.float64)
-                            #if E_te.shape[0] != 0:
-                            #    te.store_data(Pn, coordinates=X_te, forces=F_te, energies=E_te, species=list(S))
-
-
-            #sys.stdout.write("\r%d%%" % int(100))
-            #print(" Data Kept: ", Ndc, 'High Force: ', Nbf)
-            #sys.stdout.flush()
-            #print("")
-
         # Print some stats
         print('Data count:', Nd)
         print('Data split:', 100.0 * Nd / np.sum(Nd), '%')
-
         # Save train and valid meta file and cleanup testh5
         for t, v, th in zip(cachet, cachev, testh5):
             t.makemetadata()
@@ -855,29 +803,21 @@ class alaniensembletrainer():
     def build_strided_training_cache(self,Nblocks,Nvalid,Ntest,build_test=True, build_valid=False, forces=True, grad=False, Fkey='forces', forces_unit=1.0, Ekey='energies', energy_unit=1.0, Eax0sum=False, rmhighe=True):
         if not os.path.isfile(self.netdict['saefile']):
             self.sae_linear_fitting(Ekey=Ekey, energy_unit=energy_unit, Eax0sum=Eax0sum)
-
         h5d = self.h5dir
-
         store_dir = self.train_root + "cache-data-"
         N = self.Nn
         Ntrain = Nblocks - Nvalid - Ntest
-
         if Nblocks % N != 0:
             raise ValueError('Error: number of networks must evenly divide number of blocks.')
-
         Nstride = Nblocks/N
-
         for i in range(N):
             if not os.path.exists(store_dir + str(i)):
                 os.mkdir(store_dir + str(i))
-
             if build_test:
                 if os.path.exists(store_dir + str(i) + '/../testset/testset' + str(i) + '.h5'):
                     os.remove(store_dir + str(i) + '/../testset/testset' + str(i) + '.h5')
-
                 if not os.path.exists(store_dir + str(i) + '/../testset'):
                     os.mkdir(store_dir + str(i) + '/../testset')
-
         cachet = [cg('_train', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
         cachev = [cg('_valid', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
 
@@ -1011,7 +951,6 @@ class alaniensembletrainer():
         for gpu,idc in enumerate(indicies):
             processes.append(Process(target=self.train_network, args=(GPUList[gpu], idc, remove_existing)))
             processes[-1].start()
-            #self.train_network(pyncdict, trdict, layers, id, i)
 
         for p in processes:
             p.join()
@@ -1024,31 +963,23 @@ class alaniensembletrainer():
             pyncdict['ntwkStoreDir'] = self.train_root + 'train' + str(index) + '/' + 'networks/'
             pyncdict['datadir'] = self.train_root + "cache-data-" + str(index) + '/'
             pyncdict['gpuid'] = str(gpuid)
-
             if not os.path.exists(pyncdict['wkdir']):
                 os.mkdir(pyncdict['wkdir'])
-
             if remove_existing:
                 shutil.rmtree(pyncdict['ntwkStoreDir'])
-
             if not os.path.exists(pyncdict['ntwkStoreDir']):
                 os.mkdir(pyncdict['ntwkStoreDir'])
-
             outputfile = pyncdict['wkdir']+'output.opt'
-
             shutil.copy2(self.netdict['iptfile'], pyncdict['wkdir'])
             shutil.copy2(self.netdict['cnstfile'], pyncdict['wkdir'])
             shutil.copy2(self.netdict['saefile'], pyncdict['wkdir'])
-
             if "/" in self.netdict['iptfile']:
                 nfile = self.netdict['iptfile'].rsplit("/",1)[1]
             else:
                 nfile = self.netdict['iptfile']
-
             command = "cd " + pyncdict['wkdir'] + " && HDAtomNNP-Trainer -i " + nfile + " -d " + pyncdict['datadir'] + " -p 1.0 -m -g " + pyncdict['gpuid'] + " > output.opt"
             proc = subprocess.Popen (command, shell=True)
             proc.communicate()
-
             print('  -Model',index,'complete')
 
     def get_train_stats(self):
