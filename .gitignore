@@ -1,0 +1,4 @@
+# No vim swap files
+*.swp
+*.swo
+
