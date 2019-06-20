@@ -15,24 +15,26 @@ mae = ''
 # for each set of cycles inputtrain, sae_linfit and rHCNO are all THE SAME
 # so the are all inside model_dir directly
 # people manually change work_dir each time
-root_dir = '/home/ipickering/scratch/auto_dhl_al/'
-# Storage location for all the optimized structures
-optstruct_file = root_dir + 'optimized_input_files.dat'
-# Storage location for h5files
-h5_dir = root_dir + 'h5files/'
-datdir = 'ANI-1x-DHL-0000.00'
-model_dir =  root_dir + 'modeldhl/'
-work_dir = model_dir + 'ANI-1x-DHL-0000/'
+# optstruct_file: File that stores paths for all the optimized structures
+# h5_dir: Storage location for h5files
+
+main_dir = '/home/ipickering/scratch/auto_dhl_al/'
+optstruct_file = main_dir + 'optimized_input_files.dat'
+h5_dir = main_dir + 'h5files/'
+model_dir =  main_dir + 'modeldhl/'
+
 ipt_file = model_dir + 'inputtrain.ipt'
 sae_file = model_dir + 'sae_linfit.dat'
-cst_file = model_dir + 'rHCNO-5.2R_16-3.5A_a4-8.params'
+params_file = model_dir + 'rHCNO-5.2R_16-3.5A_a4-8.params'
+work_dir = model_dir + 'ANI-1x-DHL-0000/'
+
 fpatoms = ['C', 'N', 'O']
 # Training Parameters 
 #gpu_idlist is a list that holds all the GPU id's
 gpu_idlist = [0, 1]
 M   = 0.35 # Max error per atom in kcal/mol
 # The dataset is butchered into Nblock blocks, where Nblocks is a multiple of 
-# Nnets. 
+# num_networks = Nnets. 
 # From these blocks Nstrides-1 "nodes" are setup, spaced with spacing Nstrides
 # The test and validation sets for each of the networks in the ensemble
 # are set up so that they overlap "as little as possible", each T+V set
@@ -40,19 +42,40 @@ M   = 0.35 # Max error per atom in kcal/mol
 # Nblock, Nbvald, Nbtest are the number of blocks in total, in the validation
 # set and in the test set respectively. Nbtrain is calculated to be 
 # Nbtrain  = Nblock - (Nbvald + Nbtest), the blocks that are left over
-Nnets = 8 
-Nblock = 16 
-Nbvald = 3 
-Nbtest = 1 
+# Example:
+#
+# (First, data is shuffled)
+# Total blocks = 16 
+#                  |XXXXXXXXXXXXXXXX|
+# networks = 8 => num_strides = 2
+#                  |0 1 2 3 4 5 6 7 |
+# (each integer is a node, where the blocks given to each network start)
+# val=2, test=2
+#                  |XXXXXXXXXXXXXXXX|  
+#             1    |VVTT            | 
+#             2    |  VVTT          |  
+#             3    |    VVTT        |      
+#             4    |      VVTT      |       
+#             5    |        VVTT    |   
+#             6    |          VVTT  |     
+#             7    |            VVTT| 
+#             8    |TT            VV| 
+# Pairwise overlap between network j, j+1 and j-1 will be 
+# overlap = (val + tst) - num_strides
+num_networks = 8 
+num_blocks_tot = 16 
+num_blocks_val = 3 
+num_blocks_tst = 1 
 #aevsize is the size of the input to the ANIModule.
 aev_size = 384
 # Sampling parameters 
 dhparams = {'Nmol': 100, 'Nsamp': 4, 'sig' : 0.08, 'rng' : 0.2, 'MaxNa' : 40,
-             'smilefile': root_dir + 'dhl_files/dhl_genentech.smi'}
+             'smilefile': main_dir + 'dhl_files/dhl_genentech.smi'}
              # 'smilefile': 
              # '/home/jsmith48/scratch/auto_dhl_al/dhl_files/dhl_genentech.smi'}
 # Active learning cycles
 cycles = range(20)
+datdir = 'ANI-1x-DHL-0000.00'
 for cycle in cycles:
     # network_dir is the directory where each of the networks generated in each 
     # cycle is stored
@@ -60,11 +83,11 @@ for cycle in cycles:
     cache_dir = network_dir + "cache-data-"
     # directory for the active learning daa
     # this used to be cycle+1 for some reason, I just made it cycle
-    aldata_dir = root_dir + datdir + str(cycle).zfill(2)
+    aldata_dir = main_dir + datdir + str(cycle).zfill(2)
     nnfprefix   = network_dir + 'train'
     netdict = {
-            'iptfile' : ipt_file, 'cnstfile' : cst_file, 'saefile': sae_file,
-            'nnfprefix': network_dir+'train', 'aevsize': aev_size, 'num_nets': Nnets,
+            'iptfile' : ipt_file, 'cnstfile' : params_file, 'saefile': sae_file,
+            'nnfprefix': network_dir+'train', 'aevsize': aev_size, 'num_nets': num_networks,
             'atomtyp' : ['H','C','N','O']}
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
@@ -86,24 +109,24 @@ for cycle in cycles:
     ########## Training the ensemble #############
     #This gets network_dir = work_dir + datdir(withstuff)
     inputbuilder = att.anitrainerinputdesigner()
-    aet = att.alaniensembletrainer(network_dir, netdict, inputbuilder, h5_dir, Nnets)
-    aet.build_strided_training_cache(Nblock,Nbvald,Nbtest,False)
+    aet = att.alaniensembletrainer(network_dir, netdict, inputbuilder, h5_dir, num_networks)
+    aet.build_strided_training_cache(num_blocks_tot,num_blocks_val,num_blocks_tst,False)
     aet.train_ensemble(gpu_idlist)
     ##############################################
 
     ############### Run active learning ################
-    # This gets root_dir + datdir(withstuff)
-    # alconformationalsampler combines root_dir and datdir(withstuff) in 
+    # This gets main_dir + datdir(withstuff)
+    # alconformationalsampler combines main_dir and datdir(withstuff) in 
     # all calls
     acs = alt.alconformationalsampler(
-            root_dir, datdir + str(cycle+1).zfill(2),
+            main_dir, datdir + str(cycle+1).zfill(2),
             optstruct_file, fpatoms, netdict)
     acs.run_sampling_dhl(dhparams, gpus=gpu_idlist+gpu_idlist)
     ####################################################
 
     ######### Submit jobs, return and pack data ##########
-    # This gets root_dir + datdir(withstuff)
+    # This gets main_dir + datdir(withstuff)
     ast.generateQMdata(
             hostname, username, swork_dir,
-            root_dir, datdir + str(cycle+1).zfill(2), h5_dir, mae, jtime)
+            main_dir, datdir + str(cycle+1).zfill(2), h5_dir, mae, jtime)
     ###################################################
