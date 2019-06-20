@@ -2,26 +2,15 @@ import hdnntools as hdt
 import nmstools as nmt
 import pyanitools as pyt
 import pyaniasetools as aat
-import pyanitrainer as atr
 import pymolfrag as pmf
-
 from pyNeuroChem import cachegenerator as cg
-
 import numpy as np
-
-from time import sleep
 import subprocess
 import random
-#import pyssh
 import re
 import os
-
-import pyaniasetools as aat
-
 from multiprocessing import Process
 import shutil
-
-import matplotlib.pyplot as plt
 
 class alconformationalsampler():
 
@@ -672,7 +661,7 @@ class alaniensembletrainer():
 
             if not os.path.exists(store_dir + str(i) + '/../testset'):
                 os.mkdir(store_dir + str(i) + '/../testset')
-
+        # cachet is the cache training
         cachet = [cg('_train', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
         cachev = [cg('_valid', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
         testh5 = [pyt.datapacker(store_dir + str(r) + '/../testset/testset' + str(r) + '.h5') for r in range(N)]
@@ -682,19 +671,10 @@ class alaniensembletrainer():
         for f, fn in enumerate(self.h5file):
             print('Processing file(' + str(f + 1) + ' of ' + str(len(self.h5file)) + '):', fn)
             adl = pyt.anidataloader(self.h5dir+fn)
-
-            To = adl.size()
             Ndc = 0
             Fmt = []
             Emt = []
             for c, data in enumerate(adl):
-                Pn = data['path'] + '_' + str(f).zfill(6) + '_' + str(c).zfill(6)
-
-                # Progress indicator
-                #sys.stdout.write("\r%d%% %s" % (int(100 * c / float(To)), Pn))
-                #sys.stdout.flush()
-
-                # print(data.keys())
 
                 # Extract the data
                 X = data['coordinates']
@@ -802,14 +782,11 @@ class alaniensembletrainer():
 
         datadir = self.h5dir
         sae_out = self.netdict['saefile']
-
         smap = dict()
         for i,Z in enumerate(self.netdict['atomtyp']):
             smap.update({Z:i})
-
         Na = len(smap)
         files = os.listdir(datadir)
-
         X = []
         y = []
         for f in files[0:20]:
@@ -818,23 +795,19 @@ class alaniensembletrainer():
             for data in adl:
                 # print(data['path'])
                 S = data['species']
-
                 if data[Ekey].size > 0:
                     if Eax0sum:
                         E = energy_unit*np.sum(np.array(data[Ekey], order='C', dtype=np.float64), axis=1)
                     else:
                         E = energy_unit*np.array(data[Ekey], order='C', dtype=np.float64)
-
                     S = S[0:data['coordinates'].shape[1]]
                     unique, counts = np.unique(S, return_counts=True)
                     x = np.zeros(Na, dtype=np.float64)
                     for u, c in zip(unique, counts):
                         x[smap[u]] = c
-
                     for e in E:
                         X.append(np.array(x))
                         y.append(np.array(e))
-
         X = np.array(X)
         y = np.array(y).reshape(-1, 1)
 
@@ -852,41 +825,33 @@ class alaniensembletrainer():
 
         print('Linear fitting complete.')
 
-    def build_strided_training_cache(self,Nblocks,Nvalid,Ntest,build_test=True, build_valid=False, forces=True, grad=False, Fkey='forces', forces_unit=1.0, Ekey='energies', energy_unit=1.0, Eax0sum=False, rmhighe=True):
+    def build_strided_training_cache(
+            self, Nblocks, Nvalid, Ntest,build_test=True, build_valid=False,
+            forces=True, grad=False, Fkey='forces', forces_unit=1.0,
+            Ekey='energies', energy_unit=1.0, Eax0sum=False, rmhighe=True):
         if not os.path.isfile(self.netdict['saefile']):
             self.sae_linear_fitting(Ekey=Ekey, energy_unit=energy_unit, Eax0sum=Eax0sum)
-
         h5d = self.h5dir
-
         store_dir = self.train_root + "cache-data-"
         N = self.Nn
         Ntrain = Nblocks - Nvalid - Ntest
-
         if Nblocks % N != 0:
             raise ValueError('Error: number of networks must evenly divide number of blocks.')
-
         Nstride = Nblocks/N
-
         for i in range(N):
             if not os.path.exists(store_dir + str(i)):
                 os.mkdir(store_dir + str(i))
-
             if build_test:
                 if os.path.exists(store_dir + str(i) + '/../testset/testset' + str(i) + '.h5'):
                     os.remove(store_dir + str(i) + '/../testset/testset' + str(i) + '.h5')
-
                 if not os.path.exists(store_dir + str(i) + '/../testset'):
                     os.mkdir(store_dir + str(i) + '/../testset')
-
         cachet = [cg('_train', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
         cachev = [cg('_valid', self.netdict['saefile'], store_dir + str(r) + '/', False) for r in range(N)]
-
         if build_test:
             testh5 = [pyt.datapacker(store_dir + str(r) + '/../testset/testset' + str(r) + '.h5') for r in range(N)]
-
         if build_valid:
             valdh5 = [pyt.datapacker(store_dir + str(r) + '/../testset/valdset' + str(r) + '.h5') for r in range(N)]
-
         if rmhighe:
             dE = []
             for f in self.h5file:
@@ -895,81 +860,65 @@ class alaniensembletrainer():
                     S = data['species']
                     E = data['energies']
                     X = data['coordinates']
-    
                     Esae = hdt.compute_sae(self.netdict['saefile'], S)
-    
                     dE.append((E-Esae)/np.sqrt(len(S)))
-    
             dE = np.concatenate(dE)
             cidx = np.where(np.abs(dE) < 15.0)
             std = np.abs(dE[cidx]).std()
             men = np.mean(dE[cidx])
-
             print(men,std,men+std)
             idx = np.intersect1d(np.where(dE>=-np.abs(15*std+men))[0],np.where(dE<=np.abs(11*std+men))[0])
             cnt = idx.size
             print('DATADIST: ',dE.size,cnt,(dE.size-cnt),100.0*((dE.size-cnt)/dE.size))
-
         E = []
         data_count = np.zeros((N,3),dtype=np.int32)
         for f in self.h5file:
             print('Reading data file:',h5d+f)
             adl = pyt.anidataloader(h5d+f)
             for data in adl:
-                #print(data['path'],data['energies'].size)
-
                 S = data['species']
-
                 if data[Ekey].size > 0 and (set(S).issubset(self.netdict['atomtyp'])):
-
                     X = np.array(data['coordinates'], order='C',dtype=np.float32)
-
-                    #print(np.array(data[Ekey].shape),np.sum(np.array(data[Ekey], order='C', dtype=np.float64),axis=1).shape,data[Fkey].shape)
-
                     if Eax0sum:
                         E = energy_unit*np.sum(np.array(data[Ekey], order='C', dtype=np.float64),axis=1)
                     else:
                         E = energy_unit*np.array(data[Ekey], order='C',dtype=np.float64)
-
                     if forces and not grad:
                         F = forces_unit*np.array(data[Fkey], order='C', dtype=np.float32)
                     elif forces and grad:
                         F = -forces_unit*np.array(data[Fkey], order='C', dtype=np.float32)
                     else:
                         F = 0.0*X
-
                     if rmhighe:
                         Esae = hdt.compute_sae(self.netdict['saefile'], S)
-
                         ind_dE = (E - Esae)/np.sqrt(len(S))
-
                         hidx = np.union1d(np.where(ind_dE<-(15.0*std+men))[0],np.where(ind_dE>(11.0*std+men))[0])
                         lidx = np.intersect1d(np.where(ind_dE>=-(15.0*std+men))[0],np.where(ind_dE<=(11.0*std+men))[0])
-
                         if hidx.size > 0:
                             print('  -(' + f + ':' + data['path'] + ')High energies detected:\n    ', (E[hidx]-Esae)/np.sqrt(len(S)))
-
                         X = X[lidx]
                         E = E[lidx]
                         F = F[lidx]
-
                     # Build random split index
                     ridx = np.random.randint(0,Nblocks,size=E.size)
                     Didx = [np.argsort(ridx)[np.where(ridx == i)] for i in range(Nblocks)]
-
                     # Build training cache
                     for nid,cache in enumerate(cachet):
+                        print(type(cache))
+                        # This throws error
+                        # assert cache is None
+                        # assert cache == None
                         set_idx = np.concatenate([Didx[((bid+nid*int(Nstride)) % Nblocks)] for bid in range(Ntrain)])
                         if set_idx.size != 0:
                             data_count[nid,0]+=set_idx.size
-                            cache.insertdata(X[set_idx], F[set_idx], E[set_idx], list(S))
-
+                            # this breaks because it expects charges, dipoles, etc but there are none passed
+                            print(X.shape,E.shape,F.shape)
+                            cache.insertdata(X[set_idx], F[set_idx], np.zeros(X.shape[0],dtype=np.float32), np.zeros((X.shape[0],3),dtype=np.float32), np.zeros(X.shape[0]*3*3,dtype=np.float32),E[set_idx], list(S))
                     # for nid,cache in enumerate(cachev):
                     #     set_idx = np.concatenate([Didx[((1+bid+nid*int(Nstride)) % Nblocks)] for bid in range(Ntrain)])
                     #     if set_idx.size != 0:
                     #         data_count[nid,0]+=set_idx.size
                     #         cache.insertdata(X[set_idx], F[set_idx], E[set_idx], list(S))
-
                     for nid,cache in enumerate(cachev):
                         set_idx = np.concatenate([Didx[(Ntrain+bid+nid*int(Nstride)) % Nblocks] for bid in range(Nvalid)])
                         if set_idx.size != 0:
@@ -977,42 +926,33 @@ class alaniensembletrainer():
                             cache.insertdata(X[set_idx], F[set_idx], E[set_idx], list(S))
                             if build_valid:
                                 valdh5[nid].store_data(f+data['path'], coordinates=X[set_idx], forces=F[set_idx], energies=E[set_idx], species=list(S))
-
-
                     if build_test:
                         for nid,th5 in enumerate(testh5):
                             set_idx = np.concatenate([Didx[(Ntrain+Nvalid+bid+nid*int(Nstride)) % Nblocks] for bid in range(Ntest)])
                             if set_idx.size != 0:
                                 data_count[nid, 2] += set_idx.size
                                 th5.store_data(f+data['path'], coordinates=X[set_idx], forces=F[set_idx], energies=E[set_idx], species=list(S))
-
         # Save train and valid meta file and cleanup testh5
         for t, v in zip(cachet, cachev):
             t.makemetadata()
             v.makemetadata()
-
         if build_test:
             for th in testh5:
                 th.cleanup()
-
         if build_valid:
             for vh in valdh5:
                 vh.cleanup()
-
         print(' Train ',' Valid ',' Test ')
         print(data_count)
         print('Training set built.')
-
     def train_ensemble(self, GPUList, remove_existing=False):
         print('Training Ensemble...')
         processes = []
         indicies = np.array_split(np.arange(self.Nn), len(GPUList))
-
         for gpu,idc in enumerate(indicies):
             processes.append(Process(target=self.train_network, args=(GPUList[gpu], idc, remove_existing)))
             processes[-1].start()
             #self.train_network(pyncdict, trdict, layers, id, i)
-
         for p in processes:
             p.join()
         print('Training Complete.')
