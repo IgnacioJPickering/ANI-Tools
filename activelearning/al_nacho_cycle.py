@@ -44,7 +44,8 @@ M   = 0.35 # Max error per atom in kcal/mol
 # Nbtrain  = Nblock - (Nbvald + Nbtest), the blocks that are left over
 # Example:
 #
-# (First, data is shuffled)
+# (First, data is shuffled) abcdefghijklmnop -> mnjklhdabcefgiop
+#                  |abcdefghijklmnop| -> |mnjklhdabcefgiop|
 # Total blocks = 16 
 #                  |XXXXXXXXXXXXXXXX|
 # networks = 8 => num_strides = 2
@@ -62,6 +63,7 @@ M   = 0.35 # Max error per atom in kcal/mol
 #             8    |TT            VV| 
 # Pairwise overlap between network j, j+1 and j-1 will be 
 # overlap = (val + tst) - num_strides
+# all the rest is training.
 num_networks = 8 
 num_blocks_tot = 16 
 num_blocks_val = 3 
@@ -83,12 +85,15 @@ for cycle in cycles:
     cache_dir = network_dir + "cache-data-"
     # directory for the active learning daa
     # this used to be cycle+1 for some reason, I just made it cycle
+    # I believe the idea was that "The data to train the network N is in the 
+    # folder N" so since that data is generated in cycle N-1 you need to add 1
+    # to that. That idea is very confusing
     aldata_dir = main_dir + datdir + str(cycle).zfill(2)
     nnfprefix   = network_dir + 'train'
     netdict = {
             'iptfile' : ipt_file, 'cnstfile' : params_file, 'saefile': sae_file,
-            'nnfprefix': network_dir+'train', 'aevsize': aev_size, 'num_nets': num_networks,
-            'atomtyp' : ['H','C','N','O']}
+            'nnfprefix': network_dir+'train', 'aevsize': aev_size,
+            'num_nets': num_networks, 'atomtyp' : ['H','C','N','O']}
     if not os.path.exists(cache_dir):
         os.makedirs(cache_dir)
         print('Had to create cache_dir directory')
@@ -106,27 +111,29 @@ for cycle in cycles:
     except AssertionError:
         raise AssertionError('Your h5_dir directory is empty, add some files!')
 
-    ########## Training the ensemble #############
+    ########## Training the ensemble ###################
     #This gets network_dir = work_dir + datdir(withstuff)
     inputbuilder = att.anitrainerinputdesigner()
-    aet = att.alaniensembletrainer(network_dir, netdict, inputbuilder, h5_dir, num_networks)
-    aet.build_strided_training_cache(num_blocks_tot,num_blocks_val,num_blocks_tst,False)
+    aet = att.alaniensembletrainer(
+            network_dir, netdict, inputbuilder, h5_dir, num_networks)
+    aet.build_strided_training_cache(
+            num_blocks_tot,num_blocks_val,num_blocks_tst,False)
     aet.train_ensemble(gpu_idlist)
-    ##############################################
+    ####################################################
 
     ############### Run active learning ################
     # This gets main_dir + datdir(withstuff)
     # alconformationalsampler combines main_dir and datdir(withstuff) in 
     # all calls
     acs = alt.alconformationalsampler(
-            main_dir, datdir + str(cycle+1).zfill(2),
+            main_dir, datdir + str(cycle).zfill(2),
             optstruct_file, fpatoms, netdict)
     acs.run_sampling_dhl(dhparams, gpus=gpu_idlist+gpu_idlist)
     ####################################################
 
-    ######### Submit jobs, return and pack data ##########
+    ######### Submit jobs, return and pack data ########
     # This gets main_dir + datdir(withstuff)
     ast.generateQMdata(
             hostname, username, swork_dir,
-            main_dir, datdir + str(cycle+1).zfill(2), h5_dir, mae, jtime)
-    ###################################################
+            main_dir, datdir + str(cycle).zfill(2), h5_dir, mae, jtime)
+    #####################################################
