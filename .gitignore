@@ -1,0 +1,3 @@
+# No vim swap
+*.swp
+*.swo
